@@ -18,8 +18,14 @@ export async function publishWorkflowEvent(event: StreamEvent): Promise<string> 
     fields.push("action", event.action);
   }
 
-  const id = await redis.xadd(STREAM_PENDING, "*", ...fields);
-  return id ?? "";
+  try {
+    const id = await redis.xadd(STREAM_PENDING, "*", ...fields);
+    return id ?? "";
+  } catch (err) {
+    // Redis unavailability must not block the HTTP response — log and continue.
+    console.error("[streams] XADD failed (worker will not process this event):", err);
+    return "";
+  }
 }
 
 export async function ensureConsumerGroup(): Promise<void> {

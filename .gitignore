@@ -43,3 +43,6 @@ __pycache__/
 
 # claude code
 .claude/
+
+.vercel
+.env*
