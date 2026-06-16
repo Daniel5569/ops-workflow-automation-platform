@@ -4,13 +4,11 @@ import { initialRuns, initialAuditEvents } from "../lib/demo-data";
 const prisma = new PrismaClient();
 
 async function main() {
-  const existing = await prisma.workflowRun.count();
-  if (existing > 0) {
-    console.log(`Database already seeded (${existing} runs). Skipping.`);
-    return;
-  }
-
   console.log("Seeding database...");
+
+  await prisma.auditEvent.deleteMany();
+  await prisma.workflowStep.deleteMany();
+  await prisma.workflowRun.deleteMany();
 
   for (const run of initialRuns) {
     await prisma.workflowRun.create({
