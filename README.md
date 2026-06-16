@@ -1,5 +1,7 @@
 # Ops Workflow Automation Platform
 
+**[GitHub](https://github.com/Daniel5569/ops-workflow-automation-platform)**
+
 An AI-assisted operations console that routes vendor approvals, customer escalations, and invoice exceptions through deterministic evaluation, human review gates, and a persistent audit trail.
 
 **Problem solved**: Ops work scattered across email, spreadsheets, and Slack means decisions go untracked, approvals get lost, and there is no repeatable process. This platform gives ops teams a structured queue with AI-generated recommendations, human-in-the-loop controls, and a full audit log — all in one place.
