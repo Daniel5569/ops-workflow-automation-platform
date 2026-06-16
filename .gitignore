@@ -36,5 +36,10 @@ tmp/
 screenshots/
 .npm-cache/
 
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # claude code
 .claude/
