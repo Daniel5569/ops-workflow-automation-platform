@@ -1,14 +1,20 @@
 import { PrismaClient } from "@prisma/client";
 import { initialRuns, initialAuditEvents } from "../lib/demo-data";
 
-const prisma = new PrismaClient();
+// Use direct (non-pooled) URL for the seed so TRUNCATE + CREATE are visible
+// on the same connection without pgBouncer interference.
+const prisma = new PrismaClient({
+  datasources: {
+    db: { url: process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL },
+  },
+});
 
 async function main() {
   console.log("Seeding database...");
 
-  await prisma.auditEvent.deleteMany();
-  await prisma.workflowStep.deleteMany();
-  await prisma.workflowRun.deleteMany();
+  // TRUNCATE is atomic and bypasses FK ordering issues that deleteMany() has
+  // when running through a pgBouncer pooled connection.
+  await prisma.$executeRaw`TRUNCATE TABLE "AuditEvent", "WorkflowStep", "WorkflowRun" CASCADE`;
 
   for (const run of initialRuns) {
     await prisma.workflowRun.create({
