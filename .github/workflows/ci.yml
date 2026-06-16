@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ts-lint-test:
+    name: TypeScript — lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ops_workflow
+
+      - name: Lint (tsc --noEmit)
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+  python-lint-test:
+    name: Python worker — lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        run: pytest tests/ -v
+
+  docker-smoke:
+    name: Docker Compose smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy env file
+        run: cp .env.example .env
+
+      - name: Build and start services (postgres + redis + worker)
+        run: docker compose up -d postgres redis worker
+        timeout-minutes: 5
+
+      - name: Wait for worker health
+        run: |
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/health && echo "Worker ready" && break
+            echo "Waiting... ($i/20)"
+            sleep 3
+          done
+
+      - name: Check worker health endpoint
+        run: curl -f http://localhost:8000/health
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

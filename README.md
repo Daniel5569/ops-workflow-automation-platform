@@ -1,103 +1,155 @@
 # Ops Workflow Automation Platform
 
-Ops Workflow Automation Platform is a production-shaped demo of an AI-assisted internal operations console: workflow queues, simulated AI recommendations, human approval, exception handling, and audit logs in one operator-friendly surface.
+An AI-assisted operations console that routes vendor approvals, customer escalations, and invoice exceptions through deterministic evaluation, human review gates, and a persistent audit trail.
 
-## Problem
+**Problem solved**: Ops work scattered across email, spreadsheets, and Slack means decisions go untracked, approvals get lost, and there is no repeatable process. This platform gives ops teams a structured queue with AI-generated recommendations, human-in-the-loop controls, and a full audit log — all in one place.
 
-Startup operations work often lives across Slack, email, spreadsheets, CRM records, tickets, and internal tools. Automations break down when they do not have clear ownership, exception handling, review points, or audit history.
-
-This demo shows how recurring back-office workflows can become trackable runs where AI prepares the decision and a human operator approves, edits, escalates, or rejects it.
-
-## What The Demo Demonstrates
-
-- Operational dashboard with KPIs, workflow queue, filters, and search.
-- Three workflow templates that can start new synthetic runs from the UI.
-- Deterministic local AI simulation with confidence, reasoning, and recommendations.
-- Human-in-the-loop review actions that update status and create audit events.
-- Run detail view with step timeline, recommendation panel, reviewer note, and audit log.
-- Synthetic data only: no real customers, vendors, emails, keys, tokens, or private information.
-
-## Demo Workflows
-
-1. **Vendor Onboarding Review**: checks documents, spend, risk notes, missing items, and approval path.
-2. **Customer Escalation Triage**: classifies priority, assigns an owner, drafts a response, and sets SLA.
-3. **Invoice Exception Handling**: compares invoice vs PO, calculates variance, flags policy exceptions, and recommends approve/hold/escalate.
-
-## Product Walkthrough In 90 Seconds
-
-Open the app and scan the KPI strip for active runs, pending human review, automation coverage, average cycle time, and exceptions. Use the queue filters to focus on work that needs review. Select a run to inspect its status, priority, owner, due time, step timeline, AI recommendation, confidence score, and reasoning. Add a reviewer note, then approve, edit, request changes, escalate, or reject. The run status changes immediately and a new audit event is written. Start a new run from the template gallery to see the simulation generate a fresh recommendation from the input values.
+---
 
 ## Architecture
 
-```text
-app/
-  page.tsx                 Main interactive console
-  layout.tsx               App metadata and root layout
-  globals.css              Product UI system
-components/
-  dashboard-kpis.tsx
-  workflow-queue.tsx
-  workflow-template-gallery.tsx
-  run-detail-panel.tsx
-  human-review-panel.tsx
-  audit-log-table.tsx
-  status-badge.tsx
-lib/
-  demo-data.ts             Synthetic seeded workflow runs and audit events
-  workflow-engine.ts       Deterministic recommendation and transition logic
-  workflow-types.ts        Shared TypeScript types
-  formatters.ts
-tests/
-  workflow-engine.test.ts
+```
+┌───────────────────────────────────────┐
+│  Browser                              │
+│  React 19 (Next.js App Router)        │
+│  Workflow queue · KPI strip           │
+│  Human review · Audit log             │
+└──────────────┬────────────────────────┘
+               │ HTTP / REST
+┌──────────────▼────────────────────────┐
+│  Next.js 15 — API Gateway (TS)        │
+│  POST /api/workflows   (create)       │
+│  GET  /api/workflows   (list)         │
+│  GET  /api/workflows/:id              │
+│  POST /api/workflows/:id/review       │
+│                                       │
+│  Zod input validation                 │
+│  Prisma ORM → PostgreSQL 16           │
+│  ioredis → Redis Stream XADD         │
+└──────┬───────────────────┬────────────┘
+       │ Prisma            │ XADD workflow:pending
+┌──────▼──────────┐ ┌──────▼──────────────────────┐
+│  PostgreSQL 16  │ │  Redis 7                     │
+│  WorkflowRun    │ │  Stream: workflow:pending    │
+│  AuditEvent     │ │  Stream: workflow:dlq        │
+│  WorkflowStep   │ │  Consumer group: processors  │
+└──────┬──────────┘ └──────┬──────────────────────┘
+       │ psycopg2          │ XREADGROUP
+┌──────▼───────────────────▼──────────────────────┐
+│  Python / FastAPI Worker                        │
+│  Consumer group loop (XREADGROUP + XACK)        │
+│  Workflow evaluation engine (port of TS logic)  │
+│  Retry with exponential backoff (max 3)         │
+│  Dead-letter → workflow:dlq after 3 failures    │
+│  GET /health  (FastAPI healthcheck endpoint)    │
+└─────────────────────────────────────────────────┘
 ```
 
-The app uses local React state and mock data. There are no external services, databases, API keys, or required environment variables.
+---
 
-## Tech Stack
-
-- Next.js App Router
-- React
-- TypeScript
-- CSS
-- Vitest
-
-## Local Setup
+## Quick start (Docker)
 
 ```bash
-npm install
-npm run dev
+git clone <this-repo>
+cd ops-workflow-automation-platform
+
+cp .env.example .env                 # uses postgres/postgres defaults
+
+# Start postgres + redis + worker
+docker compose up -d postgres redis worker
+
+# Run migrations and seed demo data
+docker compose run --rm migrate
+
+# Start the Next.js gateway
+docker compose up -d gateway
+
+# Open the console
+open http://localhost:3000
 ```
 
-Open `http://localhost:3000`.
+> **Without Docker** (local dev with Postgres and Redis already running):
+> ```bash
+> npm install
+> npx prisma migrate dev
+> npx prisma db seed
+> npm run dev
+> # In a separate terminal:
+> cd worker && pip install -r requirements.txt && python main.py
+> ```
 
-## Commands
+---
+
+## Workflow types
+
+| Type | What it does |
+|------|-------------|
+| **Vendor onboarding** | Scores risk from spend + documentation status, flags missing MSA/tax form |
+| **Customer escalation** | Assigns priority, SLA, and team based on tier + sentiment + ARR impact |
+| **Invoice exception** | Classifies variance (major/minor/policy) and recommends approve/hold/escalate |
+
+Each run flows through: `running → needs_review → approved / escalated / rejected / failed`
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 15 (App Router), React 19, TypeScript |
+| API gateway | Next.js API routes, Zod validation, Prisma 5 |
+| Database | PostgreSQL 16 |
+| Queue | Redis 7 Streams (consumer groups, dead-letter) |
+| Worker | Python 3.12, FastAPI, psycopg2, redis-py |
+| Tests | Vitest (TS), pytest (Python) |
+| Infrastructure | Docker Compose (4 services with healthchecks) |
+| CI | GitHub Actions (lint + test for TS and Python, Docker smoke test) |
+
+---
+
+## Repository structure
+
+```
+├── app/
+│   ├── page.tsx                  # Main ops console (React client)
+│   └── api/workflows/            # REST API routes (Next.js)
+├── components/                   # WorkflowQueue, RunDetailPanel, etc.
+├── lib/
+│   ├── workflow-engine.ts        # Deterministic evaluation logic (TS)
+│   ├── workflow-types.ts         # Shared TypeScript types
+│   ├── prisma.ts                 # Prisma client singleton
+│   ├── redis.ts                  # ioredis singleton
+│   └── streams.ts                # Redis Streams publish helper
+├── prisma/
+│   ├── schema.prisma             # Database schema
+│   └── seed.ts                   # Demo data seed
+├── worker/
+│   ├── main.py                   # Consumer loop + FastAPI health endpoint
+│   ├── engine.py                 # Evaluation engine (Python port)
+│   ├── db.py                     # PostgreSQL connection pool
+│   └── tests/test_engine.py      # pytest suite
+├── tests/workflow-engine.test.ts # Vitest suite
+├── docker-compose.yml
+└── .github/workflows/ci.yml      # CI: lint, test, Docker smoke
+```
+
+---
+
+## Portfolio context
+
+This repo is part of a portfolio of AI-focused architecture demos. The other repos in the set use the same gateway → queue → worker pattern: a Next.js TypeScript gateway writes to PostgreSQL and publishes to Redis Streams; a Python/FastAPI consumer group evaluates or enriches the payload and writes results back to PostgreSQL. This repo applies that pattern to an ops automation use case — human-in-the-loop workflow review with structured audit logging.
+
+---
+
+## Running tests
 
 ```bash
-npm install
-npm run dev
-npm run lint
-npm run build
+# TypeScript (Vitest)
 npm test
+
+# Python (pytest)
+cd worker && pytest tests/ -v
+
+# TypeScript with coverage
+npm run test:coverage
 ```
-
-`npm run lint` runs TypeScript validation with `tsc --noEmit`. `npm test` covers the core workflow engine and human review transitions.
-
-## Synthetic Data And Privacy
-
-All data in this repository is synthetic and safe for a public portfolio demo. The project intentionally avoids real names, personal contact details, private business information, tokens, API keys, secrets, external credentials, and production logs.
-
-## Designed For
-
-- Startup founders who need operational leverage.
-- Operations teams managing recurring back-office workflows.
-- Customer operations and support escalation teams.
-- Finance operations teams handling exceptions and approvals.
-- Fractional operators and product builders demonstrating practical AI automation.
-
-## Why This Matters
-
-AI operations tools are only useful when operators can trust the workflow. This demo emphasizes auditability, owner accountability, exception handling, and human review instead of treating automation as a black box.
-
-## Screenshots
-
-Screenshots can be added after running the app locally or after deploying a public demo.
