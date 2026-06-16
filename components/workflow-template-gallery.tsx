@@ -2,8 +2,15 @@ import type { WorkflowInput, WorkflowTemplate, WorkflowType } from "@/lib/workfl
 import { useMemo, useState } from "react";
 import { StatusBadge } from "./status-badge";
 
-function getFieldValue(input: WorkflowInput, key: string) {
-  return String((input as unknown as Record<string, string | number>)[key] ?? "");
+type InputRecord = Record<string, string | number>;
+const NUMERIC_KEYS = new Set(["monthlySpend", "arrImpact", "invoiceAmount", "poAmount"]);
+
+function toRecord(input: WorkflowInput): InputRecord {
+  return input as unknown as InputRecord;
+}
+
+function fromRecord(record: InputRecord): WorkflowInput {
+  return record as unknown as WorkflowInput;
 }
 
 export function WorkflowTemplateGallery({
@@ -27,16 +34,12 @@ export function WorkflowTemplateGallery({
 
   function updateField(key: string, value: string) {
     setDraft((current) => {
-      const numericKeys = ["monthlySpend", "arrImpact", "invoiceAmount", "poAmount"];
-      const currentRecord = current as unknown as Record<string, string | number>;
-      return {
-        ...currentRecord,
-        [key]: numericKeys.includes(key) ? Number(value) : value
-      } as unknown as WorkflowInput;
+      const record = toRecord(current);
+      return fromRecord({ ...record, [key]: NUMERIC_KEYS.has(key) ? Number(value) : value });
     });
   }
 
-  const fields = Object.keys(selected.sampleInput as unknown as Record<string, string | number>);
+  const fields = Object.keys(toRecord(selected.sampleInput));
 
   return (
     <section className="panel template-panel">
@@ -68,7 +71,7 @@ export function WorkflowTemplateGallery({
           {fields.map((field) => (
             <label key={field}>
               <span>{field.replace(/([A-Z])/g, " $1").toLowerCase()}</span>
-              <input value={getFieldValue(draft, field)} onChange={(event) => updateField(field, event.target.value)} />
+              <input value={String(toRecord(draft)[field] ?? "")} onChange={(event) => updateField(field, event.target.value)} />
             </label>
           ))}
         </div>

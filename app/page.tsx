@@ -4,17 +4,103 @@ import { DashboardKpis } from "@/components/dashboard-kpis";
 import { RunDetailPanel } from "@/components/run-detail-panel";
 import { WorkflowQueue, type QueueFilter } from "@/components/workflow-queue";
 import { WorkflowTemplateGallery } from "@/components/workflow-template-gallery";
-import { initialAuditEvents, initialRuns, workflowTemplates } from "@/lib/demo-data";
-import { applyHumanReview, createWorkflowRun } from "@/lib/workflow-engine";
-import type { AuditEvent, HumanReviewAction, WorkflowInput, WorkflowRun, WorkflowType } from "@/lib/workflow-types";
-import { useMemo, useState } from "react";
+import { workflowTemplates } from "@/lib/demo-data";
+import type {
+  AIRecommendation,
+  AuditEvent,
+  HumanReviewAction,
+  WorkflowInput,
+  WorkflowRun,
+  WorkflowType,
+} from "@/lib/workflow-types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type ApiAuditEvent = {
+  id: string;
+  workflowRunId: string;
+  actor: string;
+  action: string;
+  beforeStatus: string;
+  afterStatus: string;
+  note: string;
+  createdAt: string;
+};
+
+type ApiRun = Omit<WorkflowRun, "input" | "recommendation" | "steps" | "createdAt" | "updatedAt"> & {
+  inputData: WorkflowInput;
+  recommendation: AIRecommendation | null;
+  createdAt: string;
+  updatedAt: string;
+  steps: WorkflowRun["steps"];
+  auditEvents: ApiAuditEvent[];
+};
+
+function mapApiRun(apiRun: ApiRun): WorkflowRun {
+  return {
+    ...apiRun,
+    input: apiRun.inputData,
+    recommendation: apiRun.recommendation ?? {
+      summary: "Evaluating…",
+      reasoning: ["Worker is processing this workflow."],
+      confidence: 0,
+      suggestedAction: "Pending",
+      nextAction: "Await worker evaluation",
+    },
+  };
+}
+
+function mapApiAuditEvent(e: ApiAuditEvent): AuditEvent {
+  return {
+    id: e.id,
+    timestamp: e.createdAt,
+    actor: e.actor,
+    action: e.action,
+    objectId: e.workflowRunId,
+    beforeStatus: e.beforeStatus as AuditEvent["beforeStatus"],
+    afterStatus: e.afterStatus as AuditEvent["afterStatus"],
+    note: e.note,
+  };
+}
+
+const POLL_INTERVAL = 3000;
 
 export default function Home() {
-  const [runs, setRuns] = useState<WorkflowRun[]>(initialRuns);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initialAuditEvents);
-  const [selectedRunId, setSelectedRunId] = useState(initialRuns[0].id);
+  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [filter, setFilter] = useState<QueueFilter>("all");
   const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadRuns = useCallback(async (silent = false) => {
+    try {
+      const res = await fetch("/api/workflows?limit=100");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { runs: ApiRun[] };
+      const mapped = data.runs.map(mapApiRun);
+      const events = data.runs.flatMap((r) => r.auditEvents.map(mapApiAuditEvent));
+      setRuns(mapped);
+      setAuditEvents(events);
+      if (!silent) {
+        setSelectedRunId((prev) => prev ?? mapped[0]?.id ?? null);
+      }
+      setError(null);
+    } catch (err) {
+      if (!silent) setError(err instanceof Error ? err.message : "Failed to load workflows");
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRuns(false);
+    pollingRef.current = setInterval(() => loadRuns(true), POLL_INTERVAL);
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [loadRuns]);
 
   const visibleRuns = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -25,34 +111,74 @@ export default function Home() {
     });
   }, [filter, runs, search]);
 
-  const selectedRun = runs.find((run) => run.id === selectedRunId) ?? visibleRuns[0] ?? runs[0];
+  const selectedRun = runs.find((r) => r.id === selectedRunId) ?? visibleRuns[0] ?? runs[0];
   const selectedEvents = auditEvents
-    .filter((event) => event.objectId === selectedRun.id)
+    .filter((e) => e.objectId === selectedRun?.id)
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
-  function startRun(type: WorkflowType, input: WorkflowInput) {
-    const run = createWorkflowRun(type, input, 2000 + runs.length + 1);
-    const event: AuditEvent = {
-      id: `AUD-${run.id}-created`,
-      timestamp: new Date().toISOString(),
-      actor: "Workflow engine",
-      action: "created run",
-      objectId: run.id,
-      beforeStatus: "created",
-      afterStatus: run.status,
-      note: `${run.title} started from template gallery.`
-    };
-    setRuns((current) => [run, ...current]);
-    setAuditEvents((current) => [event, ...current]);
-    setSelectedRunId(run.id);
-    setFilter("all");
-    setSearch("");
+  async function startRun(type: WorkflowType, input: WorkflowInput) {
+    try {
+      const res = await fetch("/api/workflows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, input }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const created = await res.json() as ApiRun;
+      const run = mapApiRun(created);
+      const events = created.auditEvents.map(mapApiAuditEvent);
+      setRuns((prev) => [run, ...prev]);
+      setAuditEvents((prev) => [...events, ...prev]);
+      setSelectedRunId(run.id);
+      setFilter("all");
+      setSearch("");
+    } catch (err) {
+      console.error("[startRun]", err);
+    }
   }
 
-  function decide(action: HumanReviewAction, note: string, editedAction?: string) {
-    const result = applyHumanReview(selectedRun, action, note, "Ops reviewer", editedAction);
-    setRuns((current) => current.map((run) => (run.id === selectedRun.id ? result.run : run)));
-    setAuditEvents((current) => [result.event, ...current]);
+  async function decide(action: HumanReviewAction, note: string, editedAction?: string) {
+    if (!selectedRun) return;
+    try {
+      const res = await fetch(`/api/workflows/${selectedRun.id}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, note, actor: "Ops reviewer", editedSuggestedAction: editedAction }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = await res.json() as ApiRun;
+      const run = mapApiRun(updated);
+      const events = updated.auditEvents.map(mapApiAuditEvent);
+      setRuns((prev) => prev.map((r) => (r.id === run.id ? run : r)));
+      setAuditEvents((prev) => {
+        const others = prev.filter((e) => e.objectId !== run.id);
+        return [...events, ...others];
+      });
+    } catch (err) {
+      console.error("[decide]", err);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="app-shell">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "var(--text-2)" }}>
+          Loading workflows…
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="app-shell">
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 12 }}>
+          <strong>Could not connect to backend</strong>
+          <span style={{ color: "var(--text-2)" }}>{error}</span>
+          <button type="button" onClick={() => { setLoading(true); loadRuns(false); }}>Retry</button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -71,11 +197,11 @@ export default function Home() {
         <header className="topbar">
           <div>
             <h1>Ops Workflow Automation Platform</h1>
-            <p>Workflow queues, simulated AI recommendations, human decisions, and auditability.</p>
+            <p>Next.js gateway · PostgreSQL · Redis Streams · Python worker</p>
           </div>
           <div className="topbar-actions">
             <span className="live-dot" />
-            <span>Synthetic demo data</span>
+            <span>Live · polling {POLL_INTERVAL / 1000}s</span>
           </div>
         </header>
         <DashboardKpis runs={runs} />
@@ -83,7 +209,7 @@ export default function Home() {
           <div className="main-column">
             <WorkflowQueue
               runs={visibleRuns}
-              selectedRunId={selectedRun.id}
+              selectedRunId={selectedRun?.id ?? ""}
               filter={filter}
               search={search}
               onFilterChange={setFilter}
@@ -94,7 +220,9 @@ export default function Home() {
               <WorkflowTemplateGallery templates={workflowTemplates} onStartRun={startRun} />
             </div>
           </div>
-          <RunDetailPanel run={selectedRun} events={selectedEvents} onDecision={decide} />
+          {selectedRun && (
+            <RunDetailPanel run={selectedRun} events={selectedEvents} onDecision={decide} />
+          )}
         </div>
       </div>
     </main>
