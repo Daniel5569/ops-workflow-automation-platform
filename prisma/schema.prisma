@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkflowType {
+  vendor_onboarding
+  customer_escalation
+  invoice_exception
+}
+
+enum RunStatus {
+  running
+  needs_review
+  approved
+  escalated
+  completed
+  blocked
+  rejected
+  failed
+}
+
+enum Priority {
+  low
+  medium
+  high
+  critical
+}
+
+enum StepStatus {
+  queued
+  running
+  completed
+  needs_review
+  blocked
+}
+
+model WorkflowRun {
+  id             String       @id @default(cuid())
+  type           WorkflowType
+  title          String
+  subject        String
+  priority       Priority     @default(low)
+  owner          String
+  status         RunStatus    @default(running)
+  dueTime        String       @default("")
+  inputData      Json
+  recommendation Json?
+  confidence     Float?
+  retryCount     Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  auditEvents AuditEvent[]
+  steps       WorkflowStep[]
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model WorkflowStep {
+  id            String     @id @default(cuid())
+  workflowRunId String
+  label         String
+  status        StepStatus @default(queued)
+  detail        String     @default("")
+
+  workflowRun WorkflowRun @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+
+  @@index([workflowRunId])
+}
+
+model AuditEvent {
+  id            String   @id @default(cuid())
+  workflowRunId String
+  actor         String
+  action        String
+  beforeStatus  String
+  afterStatus   String
+  note          String   @default("")
+  createdAt     DateTime @default(now())
+
+  workflowRun WorkflowRun @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+
+  @@index([workflowRunId])
+  @@index([createdAt])
+  @@index([actor])
+}
