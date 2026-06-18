@@ -4,7 +4,7 @@ import { DashboardKpis } from "@/components/dashboard-kpis";
 import { RunDetailPanel } from "@/components/run-detail-panel";
 import { WorkflowQueue, type QueueFilter } from "@/components/workflow-queue";
 import { WorkflowTemplateGallery } from "@/components/workflow-template-gallery";
-import { workflowTemplates } from "@/lib/demo-data";
+import { initialAuditEvents, initialRuns, workflowTemplates } from "@/lib/demo-data";
 import type {
   AIRecommendation,
   AuditEvent,
@@ -63,6 +63,17 @@ function mapApiAuditEvent(e: ApiAuditEvent): AuditEvent {
 }
 
 const POLL_INTERVAL = 3000;
+const API_TIMEOUT_MS = 5000;
+
+async function fetchWithTimeout(url: string, options?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default function Home() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
@@ -71,24 +82,29 @@ export default function Home() {
   const [filter, setFilter] = useState<QueueFilter>("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadRuns = useCallback(async (silent = false) => {
     try {
-      const res = await fetch("/api/workflows?limit=100");
+      const res = await fetchWithTimeout("/api/workflows?limit=100");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { runs: ApiRun[] };
       const mapped = data.runs.map(mapApiRun);
       const events = data.runs.flatMap((r) => r.auditEvents.map(mapApiAuditEvent));
       setRuns(mapped);
       setAuditEvents(events);
+      setDemoMode(false);
       if (!silent) {
         setSelectedRunId((prev) => prev ?? mapped[0]?.id ?? null);
       }
-      setError(null);
-    } catch (err) {
-      if (!silent) setError(err instanceof Error ? err.message : "Failed to load workflows");
+    } catch {
+      if (!silent) {
+        setRuns(initialRuns);
+        setAuditEvents(initialAuditEvents);
+        setDemoMode(true);
+        setSelectedRunId(initialRuns[0]?.id ?? null);
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -117,6 +133,7 @@ export default function Home() {
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
   async function startRun(type: WorkflowType, input: WorkflowInput) {
+    if (demoMode) return;
     try {
       const res = await fetch("/api/workflows", {
         method: "POST",
@@ -138,7 +155,7 @@ export default function Home() {
   }
 
   async function decide(action: HumanReviewAction, note: string, editedAction?: string) {
-    if (!selectedRun) return;
+    if (!selectedRun || demoMode) return;
     try {
       const res = await fetch(`/api/workflows/${selectedRun.id}/review`, {
         method: "POST",
@@ -169,18 +186,6 @@ export default function Home() {
     );
   }
 
-  if (error) {
-    return (
-      <main className="app-shell">
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 12 }}>
-          <strong>Could not connect to backend</strong>
-          <span style={{ color: "var(--text-2)" }}>{error}</span>
-          <button type="button" onClick={() => { setLoading(true); loadRuns(false); }}>Retry</button>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="app-shell">
       <nav className="sidebar" aria-label="Primary navigation">
@@ -200,10 +205,29 @@ export default function Home() {
             <p>Next.js gateway · PostgreSQL · Redis Streams · Python worker</p>
           </div>
           <div className="topbar-actions">
-            <span className="live-dot" />
-            <span>Live · polling {POLL_INTERVAL / 1000}s</span>
+            {demoMode ? (
+              <span style={{ color: "var(--text-2)", fontSize: "0.85em" }}>
+                Demo mode · static data
+              </span>
+            ) : (
+              <>
+                <span className="live-dot" />
+                <span>Live · polling {POLL_INTERVAL / 1000}s</span>
+              </>
+            )}
           </div>
         </header>
+        {demoMode && (
+          <div style={{
+            background: "var(--surface-2, #f5f5f5)",
+            borderBottom: "1px solid var(--border, #e0e0e0)",
+            padding: "8px 20px",
+            fontSize: "0.85em",
+            color: "var(--text-2)",
+          }}>
+            Live database unavailable — showing static demo data. The full stack (PostgreSQL + Redis + Python worker) runs via Docker Compose.
+          </div>
+        )}
         <DashboardKpis runs={runs} />
         <div className="content-grid" id="dashboard">
           <div className="main-column">
