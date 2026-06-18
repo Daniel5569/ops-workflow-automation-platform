@@ -2,8 +2,6 @@
 Python/FastAPI worker — consumes workflow:pending Redis Stream,
 evaluates workflows, updates PostgreSQL, handles retry + dead-letter.
 """
-import asyncio
-import json
 import logging
 import threading
 import time
