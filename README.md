@@ -1,8 +1,17 @@
 # Ops Workflow Automation Platform
 
-**[Live Demo](https://ops-workflow-automation-platform.vercel.app)** · **[GitHub](https://github.com/Daniel5569/ops-workflow-automation-platform)**
+[![CI](https://github.com/Daniel5569/ops-workflow-automation-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Daniel5569/ops-workflow-automation-platform/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+**[→ Live Demo](https://ops-workflow-automation-platform.vercel.app)** · **[→ GitHub](https://github.com/Daniel5569/ops-workflow-automation-platform)**
 
 An AI-assisted operations console that routes vendor approvals, customer escalations, and invoice exceptions through deterministic evaluation, human review gates, and a persistent audit trail.
+
+## Business Problem
+
+Ops decisions scattered across email, spreadsheets, and Slack go untracked and unaudited. A single missed vendor approval or undocumented escalation can delay a deal, trigger a compliance finding, or result in a duplicate payment.
+
+This platform centralises the queue, generates an AI recommendation for each workflow, requires a human review decision before any action is finalised, and writes every state transition to a persistent audit log — so nothing falls through the cracks and everything is traceable.
 
 **Problem solved**: Ops work scattered across email, spreadsheets, and Slack means decisions go untracked, approvals get lost, and there is no repeatable process. This platform gives ops teams a structured queue with AI-generated recommendations, human-in-the-loop controls, and a full audit log — all in one place.
 
