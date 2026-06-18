@@ -129,9 +129,6 @@ def evaluate_invoice_exception(input_data: dict[str, Any]) -> Recommendation:
     else:
         variance_pct = abs(invoice_amount - po_amount) / po_amount * 100
 
-    policy_keywords = ["scope change", "change order", "amendment", "approved"]
-    has_policy_exception = any(kw in variance_reason for kw in policy_keywords)
-
     if variance_pct >= 20:
         exception_type = "major_variance"
         suggested_action = "Escalate before payment"
