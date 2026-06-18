@@ -186,3 +186,24 @@ npm run test:coverage
 ## Portfolio context
 
 This repo is part of a portfolio of AI-focused architecture demos. The other repos in the set use the same gateway → queue → worker pattern: a Next.js TypeScript gateway writes to PostgreSQL and publishes to Redis Streams; a Python/FastAPI consumer group evaluates or enriches the payload and writes results back to PostgreSQL. This repo applies that pattern to an ops automation use case — human-in-the-loop workflow review with structured audit logging.
+## Architecture Decisions FAQ
+
+**Q: Why split the gateway (Node.js/Next.js) from the worker (Python/FastAPI) instead of one service?**
+
+The gateway handles HTTP, authentication, React SSR, and database writes — tasks where the Node.js/Next.js ecosystem is mature and the deployment surface is well understood (Vercel or any Node host). The worker runs business logic that benefits from Python: rules engines, classification models, and integration with Python-native data libraries. Merging them would mean either running Python inside a Node process (fragile) or running Node inside a Python process (unnatural for SSR). The two-service split keeps each runtime doing what it is optimized for at the cost of one internal network hop.
+
+**Q: What happens to an in-flight workflow run if the Python worker pod crashes?**
+
+Redis Streams consumer groups track message acknowledgment. A message is not removed from the stream until the worker explicitly calls XACK. If the worker crashes before acknowledging, the message stays in the pending-entries list (PEL) with a delivery counter. A separate XCLAIM sweep (configurable; omitted from the demo for simplicity) reclaims messages that have been pending longer than a threshold and redelivers them. The workflow run row in PostgreSQL remains in `processing` status — the new worker picks it up and overwrites the result idempotently.
+
+**Q: Why Redis Streams instead of PostgreSQL-backed queuing?**
+
+PostgreSQL-backed queues (pg-boss, SKIP LOCKED patterns) work well and reduce the dependency count. Redis Streams were chosen here because they make consumer group semantics — multiple workers, at-least-once delivery, pending-entries visibility, dead-letter routing — explicit in the data model rather than implemented in application code. The tradeoff is an extra infrastructure component; the benefit is that the queue state is inspectable with standard Redis tooling without writing custom SQL.
+
+**Q: Why human-in-the-loop review for AI recommendations instead of auto-applying high-confidence ones?**
+
+Auto-applying recommendations in an ops context means a model error becomes an ops incident without a human in the approval chain. The current design routes all recommendations through a review queue regardless of confidence score. A production deployment would add a configurable auto-approve threshold for low-risk action types — but the threshold and action-type allowlist are explicit policy decisions, not defaults. Starting with mandatory review and relaxing it intentionally is safer than starting with auto-apply and adding review after an incident.
+
+**Q: What kinds of ops workflows does this automate in practice?**
+
+The demo uses a generic workflow type to show the infrastructure pattern: event intake, async evaluation, structured recommendation, human review, and audit logging. In a real deployment, workflow types map to specific ops processes — approval routing for out-of-policy expenses, triage classification for support escalations, change-order risk scoring for project management. The Python engine is designed to be extended with new workflow type handlers that follow the same evaluate/recommend contract without changing the gateway or the database schema.
