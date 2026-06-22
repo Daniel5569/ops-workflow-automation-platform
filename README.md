@@ -1,6 +1,9 @@
 # Ops Workflow Automation Platform
 
 [![CI](https://github.com/Daniel5569/ops-workflow-automation-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Daniel5569/ops-workflow-automation-platform/actions/workflows/ci.yml)
+
+![Screenshot](docs/screenshot.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **[→ Live Demo](https://ops-workflow-automation-platform.vercel.app)** · **[→ GitHub](https://github.com/Daniel5569/ops-workflow-automation-platform)**
